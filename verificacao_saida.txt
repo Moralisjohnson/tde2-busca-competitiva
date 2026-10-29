@@ -1,0 +1,12 @@
+Teste 1: Lig 4 4x4 (K=3), profundidade completa a partir de s0
+  Minimax                      valor=  991  nós= 6,761,217  (36.5s)
+  Alfa-beta (sem ordenação)    valor=  991  nós=    33,810  (0.18s)
+  Alfa-beta (centro primeiro)  valor=  991  nós=    11,985  (0.07s)
+Teste 2: 200 posições aleatórias do 3x4 (K=3), profundidade completa
+  nós totais: minimax=7,627,105  alfa-beta=114,733  (1.5%)
+Teste 3: 100 finais aleatórios do 6x7 com 8 casas vazias, profundidade completa
+  nós totais: minimax=61,291  alfa-beta=7,614  (12.4%)
+Teste 4: 100 posições aleatórias do 6x7, corte em profundidade 4 com AVAL
+  nós totais: minimax=238,275  alfa-beta=26,355  (11.1%)
+
+APROVADO: alfa-beta devolveu exatamente o mesmo valor que Minimax em todos os casos
