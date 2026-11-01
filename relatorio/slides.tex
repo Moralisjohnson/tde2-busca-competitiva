@@ -1,0 +1,302 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+\usetheme[progressbar=frametitle, numbering=fraction, block=fill]{metropolis}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{booktabs,tabularx,array}
+\usepackage{amsmath,amssymb}
+\usepackage{pgfplots,pgfplotstable}
+\usepgfplotslibrary{statistics}
+\usepackage{tabuleiro}
+\input{graficos}
+
+\setbeamercolor{progress bar}{fg=corTab}
+\setbeamercolor{alerted text}{fg=corD}
+\setbeamercolor{frametitle}{bg=corTabEsc}
+\newcommand{\fn}[1]{\text{\footnotesize\MakeUppercase{#1}}}
+\newcommand{\arq}[1]{\texttt{#1}}
+\newcommand{\tempo}[1]{\hfill{\scriptsize\color{black!45}#1}}
+\newcommand{\captura}[2]{%
+  \IfFileExists{figs/#1.png}{\includegraphics[width=#2]{figs/#1.png}}{%
+    \fbox{\parbox[c][3cm][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\small
+      \arq{figs/#1.png} ausente: \arq{make capturas}}}}}
+
+\title{TDE2 --- Busca Competitiva}
+\subtitle{Um agente alfa-beta para o Lig 4}
+\author{\small Guilherme Arcanjo de Morais · Lucas da Costa Paula\\ Renan da Silva Andrade · Renan Americo Herculano}
+\institute{\footnotesize PUCPR · Inteligência Artificial (PCO118A) · Prof. Carlos Costa Cedro · RA2}
+\date{}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\section{O problema \tempo{1 min}}
+
+\begin{frame}{Lig 4 (Connect Four), 6×7}
+\begin{columns}[c]
+\column{0.58\textwidth}
+\begin{itemize}
+  \item X e O soltam peças em colunas; a peça cai até a casa livre mais baixa.
+  \item Vence quem alinhar 4. Tabuleiro cheio é empate.
+\end{itemize}
+\medskip
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Dois jogadores & sim \\
+Soma zero & sim: $U(s,O) = -U(s,X)$ \\
+Informação perfeita & sim \\
+Determinístico & sim \\
+Finito & sim: no máximo 42 jogadas \\
+\bottomrule
+\end{tabular}
+\column{0.38\textwidth}\centering
+\tabuleiro[x=6mm,y=6mm]{\tabZzFinal}[\tabZzFinalVence]\\[4pt]
+{\scriptsize uma partida do experimento: X vence na diagonal}
+\end{columns}
+\medskip
+\alert{Por que o método:} pequeno para implementar e grande demais para o Minimax puro.
+\end{frame}
+
+% =====================================================================
+\section{Modelagem \tempo{3 min}}
+
+\begin{frame}{Estado, ações e transição}
+\begin{columns}[t]
+\column{0.55\textwidth}
+\textbf{Estado} $s = (x, o, \mathit{alturas}, \mathit{vez})$
+\begin{itemize}\small
+  \item $x, o$: bitboards de 49 bits; casa $(c, r)$ é o bit $7c + r$
+  \item 1 bit sentinela (sempre 0) no topo de cada coluna
+  \item $\fn{Jogador}(s) = s.\mathit{vez}$; $s_0$: vazio, X (MAX) começa
+\end{itemize}
+\textbf{\fn{Ações}}$(s) = \{c : \mathit{alturas}[c] < 6\}$, ou $\emptyset$ se terminal\\[3pt]
+\textbf{\fn{Resultado}}$(s,c)$: liga o bit $7c + \mathit{alturas}[c]$ de quem joga e passa a vez\\[3pt]
+\textbf{\fn{Teste-Terminal}}: 4 em linha ou 42 peças;\\
+\quad $b \,\&\, (b{\gg}d) \,\&\, (b{\gg}2d) \,\&\, (b{\gg}3d) \ne 0$, $d \in \{1,7,6,8\}$
+\column{0.42\textwidth}
+\textbf{\fn{Utilidade}}$(s,\text{MAX})$: um único número
+\[
+\begin{cases}
++(1000-n) & \text{X venceu}\\
+-(1000-n) & \text{O venceu}\\
+0 & \text{empate}
+\end{cases}
+\]
+{\small $n$ = peças no tabuleiro: vitória mais rápida vale mais.}
+\medskip
+
+\begin{block}{Corte nunca parece terminal}
+$|\fn{Aval}| \le 900 < 958 \le |\fn{Utilidade}|$ de qualquer vitória
+\end{block}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Tamanho do espaço e o que a representação proíbe}
+\begin{columns}[t]
+\column{0.48\textwidth}
+\textbf{b e m medidos} (nos estados em que o agente jogou)
+\begin{itemize}\small
+  \item $b \approx \dado{b-medio}$ (7 no início), $m \approx \dado{m-medio}$ (máx.\ 42)
+  \item $7^{42} \approx \dado{bm-max}$ folhas (limite)
+  \item $\dado{b-medio}^{\,\dado{m-medio}} \approx \dado{bm-medido}$
+  \item $\approx 4{,}5\times10^{12}$ posições legais (Tromp)
+\end{itemize}
+\alert{A $10^6$ nós/s, $10^{20}$ folhas levariam milhões de anos}: alfa-beta + corte de profundidade.
+\column{0.5\textwidth}
+\textbf{Impossível por construção}
+\begin{itemize}\small
+  \item peça flutuando: só entra na casa $(c, \mathit{alturas}[c])$
+  \item jogar em coluna cheia: fora de \fn{Ações}
+  \item jogar duas vezes: \fn{Resultado} sempre passa a vez
+  \item casa dos dois: só a casa livre recebe peça
+  \item alinhamento entre colunas: o bit sentinela zera o \texttt{\&}
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Implementação: avaliação, ordenação e parada}
+\begin{columns}[c]
+\column{0.6\textwidth}
+\small
+$\fn{Aval}(s) = \sum_{\text{janelas}} [5\cdot\text{(3+1 vazia)} + 2\cdot\text{(2+2 vazias)}]_{X - O}$\\
+\hspace*{4.2em}$+\; 3\cdot(\text{centro}_X - \text{centro}_O)$, limitada a $\pm 900$
+\begin{itemize}
+  \item janela com peças dos dois lados vale 0
+  \item pesos à mão, iguais para todos os agentes
+\end{itemize}
+\textbf{Ordenação}: centro primeiro, 3, 2, 4, 1, 5, 0, 6 (custo zero)\\[3pt]
+\textbf{Parada}: profundidade fixa $d$. Com relógio, nós e jogadas dependeriam da máquina\\[3pt]
+\textbf{Custo}: cada chamada recursiva = 1 nó visitado (raiz, cortes e terminais incluídos)
+\column{0.36\textwidth}\centering
+\mapaJanelas[x=5mm,y=5mm]\\[2pt]
+{\scriptsize janelas de 4 por casa: centro \dado{janelas-max-casa}, canto \dado{janelas-canto}}
+\end{columns}
+\end{frame}
+
+% =====================================================================
+\section{Execução ao vivo \tempo{3 min}}
+
+\begin{frame}[fragile]{Visualizador: \texttt{python3 visualizador.py}}
+\begin{columns}[c]
+\column{0.68\textwidth}\centering
+\captura{jogar}{\linewidth}
+\column{0.3\textwidth}\small
+\begin{itemize}
+  \item \alert{contador de nós ao vivo} enquanto o agente pensa
+  \item valor de cada coluna na raiz (exato ou limite $\le/\ge$)
+  \item decomposição da \fn{Aval}
+  \item reproduz qualquer partida do experimento e confere com \arq{resultados.json}
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Árvore alfa-beta passo a passo}
+\begin{columns}[c]
+\column{0.68\textwidth}\centering
+\captura{arvore}{\linewidth}
+\column{0.3\textwidth}\small
+\begin{itemize}
+  \item $\alpha$ e $\beta$ no caminho atual
+  \item subárvores podadas em cinza
+  \item nós do alfa-beta $\times$ nós do Minimax
+  \item mesmo valor na raiz
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Corretude: alfa-beta = Minimax em profundidade completa}
+\small
+\begin{tabularx}{\linewidth}{Xrrc}
+\toprule
+Caso (\arq{verificacao.py}: \alert{\dado{verificacao-status}}) & Minimax & Alfa-beta & Diverg. \\
+\midrule
+4×4, $K=3$, a partir de $s_0$ & \dado{t1-mm-valor}, \dado{t1-mm-nos} nós & \dado{t1-ab-valor}, \dado{t1-ab-nos} nós & 0 \\
+200 posições 3×4, $K=3$ & \dado{t2-mm} & \dado{t2-ab} (\dado{t2-pct}) & 0 \\
+100 finais 6×7 (8 vazias) & \dado{t3-mm} & \dado{t3-ab} (\dado{t3-pct}) & 0 \\
+100 posições 6×7, $d=4$, valor e jogada & \dado{t4-mm} & \dado{t4-ab} (\dado{t4-pct}) & 0 \\
+\ifnum\dado{teste5}=1
+\dado{t5-comparacoes} casos: busca instrumentada do visualizador & \multicolumn{2}{c}{mesmo valor, jogada e nós} & 0 \\
+\fi
+\bottomrule
+\end{tabularx}
+\medskip
+
+$991 = 1000 - 9$: no 4×4 com $K=3$, X vence com jogo perfeito na 9.ª peça.\\
+Pelo Teorema 1 (Aula 7), a igualdade de valor é a evidência de que o alfa-beta não poda demais.
+\end{frame}
+
+% =====================================================================
+\section{Comparação \tempo{3 min}}
+
+\begin{frame}{Protocolo}
+\begin{itemize}
+  \item \textbf{Avaliado}: AlfaBeta-d8. \textbf{Adversários}: Aleatório (linha de base) e o próprio agente com d2, d4, d6
+  \item \textbf{Custo}: nós visitados por lance; tempo só informativo
+  \item \textbf{Variação}: 49 aberturas de 2 jogadas forçadas $\times$ 2 lados = 98 partidas por confronto;
+        aleatório com semente = nº da partida, alternando quem começa
+  \item \textbf{Calibração simétrica}: mesmo código, \fn{Aval}, pesos e ordenação; só $d$ muda
+  \item \dado{total-partidas} partidas, determinísticas: \arq{python3 experimento.py} reproduz tudo
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Resultados do AlfaBeta-d8}
+\begin{columns}[c]
+\column{0.5\textwidth}
+\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccr@{}}
+\toprule
+Adversário & V/E/D & Vitória (IC 95\,\%) & Pontos \\
+\midrule
+Aleatório & \dado{ale-V}/\dado{ale-E}/\dado{ale-D} & \dado{ale-taxa} (\dado{ale-lo} a \dado{ale-hi}) & \dado{ale-pontos} \\
+d2 & \dado{d2-V}/\dado{d2-E}/\dado{d2-D} & \dado{d2-taxa} (\dado{d2-lo} a \dado{d2-hi}) & \dado{d2-pontos} \\
+d4 & \dado{d4-V}/\dado{d4-E}/\dado{d4-D} & \dado{d4-taxa} (\dado{d4-lo} a \dado{d4-hi}) & \dado{d4-pontos} \\
+d6 & \dado{d6-V}/\dado{d6-E}/\dado{d6-D} & \dado{d6-taxa} (\dado{d6-lo} a \dado{d6-hi}) & \dado{d6-pontos} \\
+\bottomrule
+\end{tabular}
+\medskip
+
+\small 98 partidas por adversário alfa-beta, 100 contra o aleatório.\\
+Contra o d6 o IC fica abaixo de 50\,\%: \alert{não dá para afirmar d8 > d6}.
+\column{0.47\textwidth}
+\graficoResultados[width=0.9\linewidth, height=5cm, yticklabels={Aleat.,d2,d4,d6},
+  legend style={legend columns=2}]
+\end{columns}
+\end{frame}
+
+\begin{frame}{Custo por lance: a distribuição inteira}
+\begin{columns}[c]
+\column{0.52\textwidth}
+\scriptsize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Nós/lance & Média & Mediana & p95 & Máx. & Adv. \\
+\midrule
+vs Aleat. & \dado{ale-media} & \dado{ale-mediana} & \dado{ale-p95} & \dado{ale-max} & \dado{ale-advmedia} \\
+vs d2 & \dado{d2-media} & \dado{d2-mediana} & \dado{d2-p95} & \dado{d2-max} & \dado{d2-advmedia} \\
+vs d4 & \dado{d4-media} & \dado{d4-mediana} & \dado{d4-p95} & \dado{d4-max} & \dado{d4-advmedia} \\
+vs d6 & \dado{d6-media} & \dado{d6-mediana} & \dado{d6-p95} & \dado{d6-max} & \dado{d6-advmedia} \\
+\bottomrule
+\end{tabular}
+\medskip
+
+\small Cauda pesada: a média fica 2 a 3 vezes acima da mediana, e o máximo passa de 1 milhão de nós.
+\column{0.46\textwidth}
+\graficoCaixas[width=\linewidth, height=5.4cm, xticklabels={Aleat.,d2,d4,d6}, ylabel={nós por lance}]
+\end{columns}
+\end{frame}
+
+\begin{frame}{Ordenação centro-primeiro}
+\begin{columns}[c]
+\column{0.45\textwidth}\centering
+\graficoOrdenacao[width=0.95\linewidth, height=0.95\linewidth]
+\column{0.53\textwidth}
+\begin{itemize}\small
+  \item mesmas \dado{ord-posicoes} posições, d8
+  \item média \dado{ord-com-media} com $\times$ \dado{ord-sem-media} sem (\(-\)\dado{ord-reducao-media})
+  \item mediana \dado{ord-com-mediana} $\times$ \dado{ord-sem-mediana}
+  \item valor da raiz idêntico: \dado{ord-mesmos}
+  \item \alert{em \dado{ord-pior} posições custou mais}, até \dado{ord-razao-max}$\times$
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% =====================================================================
+\section{O que não funcionou \tempo{2 min}}
+
+\begin{frame}{A \fn{Aval} ignora a paridade das ameaças}
+\vspace*{2mm}
+\begin{columns}[c]
+\column{0.5\textwidth}\centering
+\tabuleiro[x=3.2mm,y=3.2mm]{\tabZzAntes}[][\colZzAntes]\hspace{2mm}%
+\tabuleiro[x=3.2mm,y=3.2mm]{\tabZzPerdido}[][\colZzPerdido]\\[2pt]
+{\scriptsize \dado{zz-antes-pecas} peças: valor \dado{zz-antes-valor} \hspace{6mm} \dado{zz-perdido-pecas} peças: \dado{zz-perdido-valor}}
+\medskip
+
+\graficoZugzwang[width=\linewidth, height=3.7cm, xlabel={peças quando o d8 (O) decide}, ylabel={}]
+\column{0.48\textwidth}
+\small
+\begin{itemize}
+  \item o d8 perdeu \dado{d2-D} partidas até para o d2, \dado{d2-perdidas-O} delas como O, todas com
+        \dado{d2-perdidas-O-min} a \dado{d2-perdidas-O-max} peças
+  \item partida nº \dado{zz-id}: com \dado{zz-antes-pecas} peças a busca ainda via \dado{zz-antes-valor};
+        com \dado{zz-perdido-pecas}, já via a derrota forçada
+  \item ameaças em linha ímpar ou par decidem o final, e a \fn{Aval} conta as duas igual
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Garantias que o sistema não tem}
+\begin{itemize}
+  \item \textbf{Não é ótimo}: só $|v| \ge 958$ é resultado provado; o resto é estimativa
+  \item \textbf{Efeito horizonte}: não há busca de quiescência
+  \item \textbf{Custo sem teto}: profundidade fixa; pior lance medido \dado{d2-max} nós
+  \item \textbf{Pesos não ajustados}: (5, 2, 3) escolhidos à mão
+  \item \textbf{Validade restrita}: contra alfa-beta, só as 49 aberturas testadas
+  \item \textbf{Determinístico}: um adversário pode repetir uma linha vencedora
+  \item \textbf{Retornos decrescentes}: d8 $\times$ d6 indistinguível com 98 partidas
+\end{itemize}
+\end{frame}
+
+\end{document}

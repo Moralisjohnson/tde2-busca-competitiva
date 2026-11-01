@@ -5,6 +5,8 @@
 3. 100 finais aleatórios do Lig 4 6x7 com 8 casas vazias, profundidade completa.
 4. 100 posições aleatórias do 6x7 com corte em profundidade 4 e a mesma AVAL:
    mesmo valor e mesma jogada escolhida.
+5. As versões instrumentadas usadas pelo visualizador (rastreio.py) são idênticas às de busca.py:
+   mesmo valor, mesma jogada e mesmo número de nós.
 
 Uso: python3 verificacao.py
 """
@@ -14,6 +16,8 @@ import time
 
 from busca import Avaliacao, Contador, alfabeta, decidir, minimax, ordem_centro
 from lig4 import Lig4
+from rastreio import (ContadorCancelavel, Rastro, alfabeta_rastreado, componentes_aval, decidir_detalhado,
+                      minimax_rastreado)
 
 falhas = 0
 
@@ -92,6 +96,37 @@ for i in range(100):
     confere(f"6x7 d4 #{i} valor", vm, va)
     confere(f"6x7 d4 #{i} jogada", am, aa)
 print(f"  nós totais: minimax={nm:,}  alfa-beta={na:,}  ({100 * na / nm:.1f}%)")
+
+# 5 ------------------------------------------------------------------
+print("Teste 5: rastreio.py (visualizador) == busca.py em valor, jogada e nós")
+casos = 0
+for jogo, n_pos, prof, seed in ((Lig4(3, 4, 3), 60, None, 5), (Lig4(), 60, 3, 6)):
+    aval = Avaliacao(jogo)
+    rng = random.Random(seed)
+    for i in range(n_pos):
+        s = posicao_aleatoria(jogo, rng.randint(0, 20) if jogo.linhas == 6 else rng.randint(4, 8), rng)
+        for ordem in (None, ordem_centro(jogo)):
+            c1, c2 = Contador(), Contador()
+            v1 = alfabeta(jogo, s, prof, aval, c1, ordem)
+            v2 = alfabeta_rastreado(jogo, s, prof, aval, c2, ordem, rastro=(r := Rastro()))
+            confere(f"rastreio alfabeta valor #{i}", v1, v2)
+            confere(f"rastreio alfabeta nós #{i}", c1.nos, c2.nos)
+            confere(f"rastreio alfabeta árvore #{i}", c1.nos, len(r.nos))
+            c1, c2 = Contador(), Contador()
+            v1 = minimax(jogo, s, prof, aval, c1, ordem)
+            v2 = minimax_rastreado(jogo, s, prof, aval, c2, ordem, rastro=Rastro())
+            confere(f"rastreio minimax valor #{i}", v1, v2)
+            confere(f"rastreio minimax nós #{i}", c1.nos, c2.nos)
+            if jogo.linhas == 6:
+                c1, c2 = Contador(), ContadorCancelavel()
+                a1, v1 = decidir(jogo, s, alfabeta, 4, aval, c1, ordem)
+                a2, v2, _ = decidir_detalhado(jogo, s, 4, aval, c2, ordem)
+                confere(f"decidir_detalhado jogada #{i}", a1, a2)
+                confere(f"decidir_detalhado valor #{i}", v1, v2)
+                confere(f"decidir_detalhado nós #{i}", c1.nos, c2.nos)
+                confere(f"componentes_aval #{i}", aval(s), componentes_aval(aval, s)["total"])
+            casos += 1
+print(f"  {casos} comparações (com e sem ordenação)")
 
 print()
 if falhas:

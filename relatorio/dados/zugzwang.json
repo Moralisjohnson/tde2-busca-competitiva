@@ -1,0 +1,154 @@
+{
+ "id": 3,
+ "lances": [
+  0,
+  1,
+  3,
+  3,
+  3,
+  3,
+  5,
+  4,
+  4,
+  3,
+  4,
+  4,
+  4,
+  3,
+  4,
+  0,
+  1,
+  1,
+  1,
+  1,
+  2,
+  2,
+  1,
+  0,
+  0,
+  0,
+  0,
+  6,
+  6,
+  6,
+  6,
+  6,
+  6,
+  2,
+  2
+ ],
+ "traco": [
+  {
+   "pecas": 3,
+   "aval": 3,
+   "valor": 6,
+   "nos": 22766,
+   "coluna": 3
+  },
+  {
+   "pecas": 5,
+   "aval": 3,
+   "valor": 6,
+   "nos": 24159,
+   "coluna": 3
+  },
+  {
+   "pecas": 7,
+   "aval": 6,
+   "valor": 2,
+   "nos": 120711,
+   "coluna": 4
+  },
+  {
+   "pecas": 9,
+   "aval": 7,
+   "valor": 0,
+   "nos": 41088,
+   "coluna": 3
+  },
+  {
+   "pecas": 11,
+   "aval": 12,
+   "valor": 2,
+   "nos": 26359,
+   "coluna": 4
+  },
+  {
+   "pecas": 13,
+   "aval": 0,
+   "valor": -2,
+   "nos": 18740,
+   "coluna": 3
+  },
+  {
+   "pecas": 15,
+   "aval": -3,
+   "valor": -6,
+   "nos": 12121,
+   "coluna": 0
+  },
+  {
+   "pecas": 17,
+   "aval": -5,
+   "valor": -9,
+   "nos": 9969,
+   "coluna": 1
+  },
+  {
+   "pecas": 19,
+   "aval": -6,
+   "valor": -10,
+   "nos": 14476,
+   "coluna": 1
+  },
+  {
+   "pecas": 21,
+   "aval": -10,
+   "valor": -10,
+   "nos": 4149,
+   "coluna": 2
+  },
+  {
+   "pecas": 23,
+   "aval": -10,
+   "valor": -8,
+   "nos": 1685,
+   "coluna": 0
+  },
+  {
+   "pecas": 25,
+   "aval": -10,
+   "valor": -5,
+   "nos": 874,
+   "coluna": 0
+  },
+  {
+   "pecas": 27,
+   "aval": -13,
+   "valor": 965,
+   "nos": 236,
+   "coluna": 6
+  },
+  {
+   "pecas": 29,
+   "aval": -11,
+   "valor": 965,
+   "nos": 206,
+   "coluna": 6
+  },
+  {
+   "pecas": 31,
+   "aval": -8,
+   "valor": 965,
+   "nos": 100,
+   "coluna": 6
+  },
+  {
+   "pecas": 33,
+   "aval": -8,
+   "valor": 965,
+   "nos": 11,
+   "coluna": 2
+  }
+ ]
+}

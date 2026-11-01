@@ -50,6 +50,7 @@ def partida(args):
     s = JOGO.inicial()
     nos = {"avaliado": [], "adversario": []}
     estados_avaliado = []
+    lances = list(abertura)  # sequência completa de colunas jogadas (para reprodução e figuras)
     for a in abertura:  # jogadas forçadas de abertura (não contam custo)
         s = JOGO.resultado(s, a)
     t0 = time.perf_counter()
@@ -61,13 +62,14 @@ def partida(args):
         else:
             a, n = adv.jogar(JOGO, s)
             nos["adversario"].append(n)
+        lances.append(a)
         s = JOGO.resultado(s, a)
     u = JOGO.utilidade(s)
     vencedor = None if u == 0 else (MAX if u > 0 else MIN)
     res = "E" if vencedor is None else ("V" if vencedor == lado_avaliado else "D")
     return {
         "id": id_, "avaliado_comeca": avaliado_comeca, "abertura": list(abertura),
-        "resultado": res, "jogadas": sum(s.alturas), "nos": nos,
+        "resultado": res, "jogadas": sum(s.alturas), "nos": nos, "lances": lances,
         "segundos": time.perf_counter() - t0, "estados_avaliado": estados_avaliado,
     }
 
@@ -162,6 +164,7 @@ def main():
         "posicoes": N_ORDENACAO, "com": resumo(com), "sem": resumo(sem),
         "razao_com_sem": resumo(razoes), "mesmos_valores": mesmos_valores,
         "pior_caso_ordenacao_mais_cara": sum(c > s for c, s in zip(com, sem)),
+        "por_posicao": [[c, s] for c, s in zip(com, sem)],  # nós (com, sem) em cada posição da amostra
     }
 
     # fator de ramificação efetivo observado: média de ações legais por estado visto nas partidas

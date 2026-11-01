@@ -1,0 +1,259 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{lmodern}
+\usepackage[margin=1.8cm]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,tabularx,array,colortbl}
+\usepackage{enumitem}
+\usepackage{needspace}
+\usepackage{pgfplots}
+\usepackage{tabuleiro}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\setlist{itemsep=1pt,topsep=2pt,leftmargin=1.2em}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}{>{\raggedright\arraybackslash}p{0.24\linewidth}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\definecolor{cinzaCampo}{HTML}{F1EFEA}
+\definecolor{cinzaDica}{HTML}{6B7078}
+\newcommand{\fn}[1]{\textup{\textsc{#1}}}
+\newcommand{\campo}[2]{\cellcolor{cinzaCampo}\textbf{#1}\newline{\footnotesize\color{cinzaDica}\itshape #2}}
+\newcommand{\secao}[1]{\par\needspace{14\baselineskip}\medskip{\large\bfseries\color{corTabEsc}#1}\par\vspace{2pt}}
+\newcommand{\aviso}[2]{\par\smallskip\fcolorbox{corDestaque}{corDestaque!6}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule}{\small\textbf{#1}\enspace #2}}\par}
+\newcommand{\ok}{\textcolor{corV}{\boldmath$\checkmark$}}
+
+\begin{document}
+
+{\small PUCPR \enspace|\enspace Escola Politécnica \enspace|\enspace Bacharelado em Ciência da Computação\\
+Inteligência Artificial (PCO118A) \enspace·\enspace Prof. Carlos Costa Cedro}
+
+\medskip
+{\LARGE\bfseries TDE2 --- Busca Competitiva}\\[2pt]
+{\large Ficha de projeto \enspace·\enspace preencher em sala em 14/10}\\[2pt]
+{\small RA2 \enspace·\enspace peso 4,0 \enspace·\enspace execução de 20/10 a 27/10}
+
+\smallskip
+{\small\itshape O trabalho é construir um agente para um jogo de soma zero com informação perfeita e avaliar seu
+desempenho em comparação com outros agentes, que é literalmente o texto do indicador ID2.3.}
+
+\begin{tabularx}{\linewidth}{@{}LY@{}}
+\toprule
+\campo{Equipe}{nomes completos} &
+Guilherme Arcanjo de Morais\newline Lucas da Costa Paula\newline Renan da Silva Andrade\newline Renan Americo Herculano \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{1. O jogo}
+\begin{tabularx}{\linewidth}{@{}LY@{}}
+\toprule
+\campo{Jogo escolhido}{nome e regras em duas linhas} &
+Lig 4 (Connect Four), tabuleiro vertical de 6 linhas × 7 colunas.\newline
+X e O alternam soltando uma peça em uma coluna não cheia; a peça cai até a casa livre mais baixa. Vence quem alinhar
+4 peças na horizontal, vertical ou diagonal; tabuleiro cheio sem alinhamento é empate. \\
+\midrule
+\campo{Verificação}{é de dois jogadores? de soma zero? de informação perfeita? determinístico? finito? responda as cinco} &
+\textbf{Dois jogadores:} sim, X e O se alternam.\newline
+\textbf{Soma zero:} sim. A vitória de um é a derrota do outro e o empate vale 0 para os dois:
+$\fn{Utilidade}(s, O) = -\fn{Utilidade}(s, X)$.\newline
+\textbf{Informação perfeita:} sim, o tabuleiro inteiro é visível para os dois jogadores.\newline
+\textbf{Determinístico:} sim, $\fn{Resultado}(s, a)$ é único e não há sorteio.\newline
+\textbf{Finito:} sim, cada jogada ocupa uma das 42 casas, então toda partida acaba em no máximo 42 jogadas. \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{2. Formalização (ID2.1)}
+\begin{tabularx}{\linewidth}{@{}LY@{}}
+\toprule
+\campo{Estado e $s_0$}{incluindo de quem é a vez. Sem isso, \fn{Jogador}(s) não é função do estado} &
+$s = (x, o, \mathit{alturas}, \mathit{vez})$. $x$ e $o$ são bitboards de 49 bits (7 colunas × 7 bits, com 1 bit
+sentinela por coluna) com as casas ocupadas por X e por O; $\mathit{alturas}[c] \in \{0..6\}$ é o número de peças na
+coluna $c$; $\mathit{vez} \in \{X, O\}$ é quem joga. $\fn{Jogador}(s) = s.\mathit{vez}$.\newline
+$s_0$ = tabuleiro vazio, $\mathit{alturas} = (0, \dots, 0)$, $\mathit{vez} = X$ (MAX começa). \\
+\midrule
+\campo{\fn{Ações} e \fn{Resultado}}{jogadas legais e o modelo de transição} &
+$\fn{Ações}(s) = \{ c \in \{0..6\} : \mathit{alturas}[c] < 6 \}$, ou $\emptyset$ se $s$ é terminal. Logo
+$|\fn{Ações}(s)| \le 7$.\newline
+$\fn{Resultado}(s, c)$: coloca a peça de $\fn{Jogador}(s)$ na casa (coluna $c$, linha $\mathit{alturas}[c]$), incrementa
+$\mathit{alturas}[c]$ e passa a vez. Jogar em coluna cheia é erro. \\
+\midrule
+\campo{\fn{Teste-Terminal}}{quando o jogo acaba} &
+Verdadeiro se X ou O tem 4 em linha ou se as 42 casas estão ocupadas. O alinhamento é testado no bitboard: para cada
+uma das 4 direções, $b \mathbin{\&} (b{\gg}d) \mathbin{\&} (b{\gg}2d) \mathbin{\&} (b{\gg}3d) \ne 0$. \\
+\midrule
+\campo{\fn{Utilidade}(s, MAX)}{sempre do ponto de vista de MAX. Um único número, não dois} &
+$\fn{Utilidade}(s, \text{MAX}) = +(1000 - n)$ se X venceu, $-(1000 - n)$ se O venceu e 0 no empate, onde $n$ é o número
+de peças no tabuleiro ($n \le 42$).\newline
+É um único número; $\fn{Utilidade}(s, \text{MIN}) = -\fn{Utilidade}(s, \text{MAX})$. O desconto por $n$ depende só do
+estado e faz a vitória mais rápida valer mais, o que impede o agente de adiar uma vitória que já viu. Toda vitória
+vale pelo menos 958 em módulo e a avaliação heurística é limitada a $\pm 900$, então um corte nunca se confunde com
+um terminal. \\
+\midrule
+\campo{$b$ e $m$ estimados}{fator de ramificação médio e profundidade típica, com a conta de $b^m$} &
+$b$: 7 no início, caindo quando colunas enchem. Média medida nos estados em que o agente jogou: $b \approx \dado{b-medio-1}$.\newline
+$m$: no máximo 42 jogadas. Duração média medida: \dado{m-medio} jogadas (\dado{d6-durmedia} contra AlfaBeta-d6).\newline
+Conta: o limite superior é $b^m = 7^{42} \approx \dado{bm-max}$ folhas; com os valores medidos,
+$\dado{b-medio-1}^{\,\dado{m-medio}} \approx \dado{bm-medido}$. As posições legais distintas são $\approx 4{,}5 \times 10^{12}$
+(contagem de Tromp). Mesmo a $10^6$ nós/s a árvore completa é inviável, por isso usamos alfa-beta com corte de
+profundidade. \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{3. Implementação (ID2.2)}
+\begin{tabularx}{\linewidth}{@{}LY@{}}
+\toprule
+\campo{Ordenação de jogadas}{que heurística barata você usa para tentar examinar primeiro a melhor jogada} &
+Centro primeiro: as colunas são examinadas na ordem 3, 2, 4, 1, 5, 0, 6 (tabela fixa, custo zero). A coluna central
+participa de \dado{inclusoes-centro} das \dado{inclusoes} inclusões casa-janela (a de borda, de \dado{inclusoes-borda}),
+então as jogadas centrais costumam ser as melhores e provocam podas cedo.\newline
+Medido em \dado{ord-posicoes} posições com $d = 8$: média de \dado{ord-com-media} nós com ordenação contra
+\dado{ord-sem-media} sem (medianas \dado{ord-com-mediana} e \dado{ord-sem-mediana}), com o mesmo valor na raiz. Em
+\dado{ord-pior} das \dado{ord-posicoes} posições a ordenação custou mais nós. \\
+\midrule
+\campo{Função de avaliação}{as características e os pesos, com a justificativa de cada um} &
+$\fn{Aval}(s) = \sum_{\text{janelas}} [5\cdot(\text{3 de X + 1 vazia}) + 2\cdot(\text{2 de X + 2 vazias})] - (\text{o mesmo para O})
++ 3\cdot(\text{peças de X} - \text{peças de O na coluna central})$, limitada a $\pm 900$.\newline
+As \dado{janelas} janelas são todos os segmentos de 4 casas em linha. Uma janela com peças dos dois lados vale 0, porque
+ninguém pode mais vencer por ela.\newline
+Peso 5, 3 abertas: ameaça a uma jogada da vitória. Peso 2, 2 abertas: ameaça em construção, ainda faltam 2 jogadas.
+Peso 3 por peça no centro: a casa central está em \dado{janelas-max-casa} janelas, contra \dado{janelas-canto} de um
+canto, então o centro dá controle posicional. Os pesos foram escolhidos à mão, sem ajuste fino, e são os mesmos para
+todos os agentes de busca. \\
+\midrule
+\campo{Mecanismo de parada}{profundidade fixa, aprofundamento iterativo com relógio, quiescência} &
+Profundidade fixa $d$ (agente avaliado $d = 8$; adversários $d = 2$, 4 e 6), cortando também nos terminais.\newline
+Preferimos profundidade fixa a relógio porque o custo é medido em nós: com relógio, a quantidade de nós e as jogadas
+dependeriam da máquina e o experimento não seria reprodutível. Não há busca de quiescência, então o efeito horizonte é
+possível (limitação declarada). \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{4. Protocolo experimental (ID2.3)}
+\begin{tabularx}{\linewidth}{@{}LY@{}}
+\toprule
+\campo{Adversários}{mínimo obrigatório: um agente aleatório e o seu próprio agente com profundidade menor} &
+(1) Aleatório: escolha uniforme em $\fn{Ações}(s)$, com semente fixa. É a linha de base trivial.\newline
+(2) O próprio agente com profundidade menor: AlfaBeta-d2, d4 e d6, com o mesmo código, a mesma \fn{Aval}, os mesmos pesos
+e a mesma ordenação. Só a profundidade muda, então a calibração é simétrica. \\
+\midrule
+\campo{Unidade de custo}{nós visitados. Não gerações, não segundos} &
+Nós visitados: cada chamada à função recursiva de busca conta 1, incluindo a raiz, as folhas cortadas por profundidade
+e os terminais.\newline
+Para cada lance do agente avaliado reportamos média, desvio, mediana, p95 e máximo. O tempo de parede só é registrado
+como informação e não entra nas comparações. \\
+\midrule
+\campo{Partidas e semente}{quantas partidas, quem começa, como as aberturas são variadas} &
+vs AlfaBeta-d2/d4/d6: as 2 primeiras jogadas são forçadas e percorrem as $7 \times 7 = 49$ aberturas, cada uma jogada
+2 vezes trocando quem começa: 98 partidas por confronto. Não há sorteio; empates entre jogadas são desfeitos pela ordem
+de exame.\newline
+vs Aleatório: 100 partidas, com semente do adversário igual ao número da partida (0 a 99); o agente avaliado começa
+nas partidas pares.\newline
+Total de \dado{total-partidas} partidas. A amostra do teste de ordenação usa semente 42. Tudo é reproduzível com
+\texttt{python3 experimento.py}. \\
+\bottomrule
+\end{tabularx}
+
+\aviso{Uma armadilha específica de jogos:}{dois agentes determinísticos jogam sempre a MESMA partida. Cem partidas
+seriam uma partida repetida cem vezes. Varie a abertura por sorteio, ou alterne quem começa, e declare isso no protocolo.}
+
+% ---------------------------------------------------------------------
+\secao{5. Verificação antes de sair da aula}
+{\small Marque cada item e mostre ao professor. O entregável do bloco não é a ficha preenchida, é o código rodando.}
+
+\begin{tabularx}{\linewidth}{@{}cY@{}}
+\toprule
+\boldmath$\checkmark$ & \textbf{Item} \\
+\midrule
+\ok & O jogo passa nas cinco verificações da seção 1 \\
+\ok & O estado inclui de quem é a vez \\
+\ok & A utilidade é um único número, do ponto de vista de MAX \\
+\ok & Minimax roda em profundidade completa em uma instância pequena do seu jogo
+      {\small (\texttt{verificacao.py}: Lig 4 4×4 com $K = 3$, a partir de $s_0$: valor \dado{t1-mm-valor}, \dado{t1-mm-nos} nós)} \\
+\ok & Alfa-beta devolve exatamente o mesmo valor que Minimax nessa instância
+      {\small (4×4 $K=3$: \dado{t1-ab-valor} com \dado{t1-ab-nos} nós; também 200 posições 3×4, 100 finais 6×7 em profundidade
+      completa e 100 posições 6×7 com $d = 4$: zero divergências)} \\
+\bottomrule
+\end{tabularx}
+
+\aviso{Sobre o último item, e ele é o mais importante:}{a igualdade de valor entre Minimax e alfa-beta em profundidade
+completa é a única evidência de corretude que o Teorema 1 da Aula 7 autoriza exigir, e é barata de produzir. Sem ela
+não há como distinguir um alfa-beta correto de um que poda demais. Este item vale nota.}
+
+% ---------------------------------------------------------------------
+\secao{6. Critérios de avaliação}
+\begin{tabularx}{\linewidth}{@{}Ycc@{}}
+\toprule
+\textbf{Critério} & \textbf{Peso} & \textbf{Indicador} \\
+\midrule
+Formalização do jogo: os seis componentes especificados e justificados & 1,0 & ID2.1 \\
+Alfa-beta correto, verificado por igualdade de valor com Minimax & 1,0 & ID2.2 \\
+Protocolo reprodutível, com unidade de custo e calibração simétricas & 1,0 & ID2.3 \\
+Análise dos resultados, com distribuição reportada e garantias ausentes declaradas & 1,0 & ID2.3 \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{7. As três formas de perder nota por comparação injusta}
+{\small Elas valem nota, e estão anunciadas de antemão.}
+
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.2\linewidth}Y>{\raggedright\arraybackslash}p{0.28\linewidth}@{}}
+\toprule
+\textbf{A falha} & \textbf{Como se manifesta} & \textbf{Como evitar} \\
+\midrule
+Unidade de custo incomparável & Comparar gerações com iterações, ou qualquer coisa com segundos. Uma geração com
+população 50 custa 50 avaliações; uma iteração de Simulated Annealing custa 1; um lance de busca custa milhares de nós
+& Medir tudo na mesma unidade, declarada no relatório \\
+Calibração assimétrica & Varrer dezenas de configurações de um método e comparar contra o outro nos valores padrão.
+Isso mede a diferença entre calibrar e não calibrar & Mesmo esforço de calibração dos dois lados, declarado no relatório \\
+Melhor caso, sem linha de base & Reportar a melhor de N execuções. Isso mede a sorte, não o método & Reportar média,
+pior caso e taxa de sucesso. Sempre incluir a linha de base trivial \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{8. Armadilhas na escolha do jogo}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}Y>{\raggedright\arraybackslash}p{0.32\linewidth}@{}}
+\toprule
+\textbf{Escolha} & \textbf{O que dá errado} & \textbf{Redirecionamento} \\
+\midrule
+Jogo da velha & Minimax puro resolve inteiro, então alfa-beta não é necessário e o corte de profundidade não faz sentido
+& Aceito apenas como instância de verificação, nunca como o jogo do trabalho \\
+Xadrez completo & Implementar as regras consome o prazo inteiro e sobra zero tempo para o experimento & Escolher um
+subconjunto, como finais de rei e torre, ou trocar de jogo \\
+Jogo com sorteio de dados & Deixa de ser determinístico, e o valor de um nó vira uma esperança & Fora do escopo do
+RA2. Trocar de jogo \\
+Jogo com informação oculta & Estratégias puras deixam de bastar, e a solução exige aleatorização & Fora do escopo do
+RA2. Trocar de jogo \\
+\bottomrule
+\end{tabularx}
+
+% ---------------------------------------------------------------------
+\secao{Roteiro da apresentação}
+{\small Em 27/10, cada equipe tem 12 minutos, com 3 minutos de arguição para apresentar o TDE2 ao professor. A
+apresentação é avaliada pelo mesmo instrumento do relatório, e não separadamente.}
+
+\begin{tabularx}{\linewidth}{@{}cY@{}}
+\toprule
+\textbf{Tempo} & \textbf{O que mostrar} \\
+\midrule
+1 min & O problema e por que ele é adequado ao método. Sem introdução histórica \\
+3 min & A modelagem: representação, o tamanho do espaço com a conta, e o que a representação torna impossível por construção \\
+3 min & Uma execução ao vivo ou gravada, com o contador de custo visível na tela \\
+3 min & A tabela de comparação contra as linhas de base, na mesma unidade e com a distribuição, não só o melhor caso \\
+2 min & O que não funcionou, e as garantias que o seu sistema não tem \\
+\bottomrule
+\end{tabularx}
+
+\aviso{O item que mais pesa e que as equipes costumam pular:}{o último. Uma apresentação que só mostra o que deu certo
+perde pontos no indicador de avaliação de resultados. Declarar explicitamente uma limitação medida vale mais que um
+resultado bonito sem ressalva.}
+
+\end{document}

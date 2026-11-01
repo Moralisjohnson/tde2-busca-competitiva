@@ -1,0 +1,542 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,tabularx,multirow,array}
+\usepackage{graphicx}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{pgfplots,pgfplotstable}
+\usepgfplotslibrary{statistics}
+\usepackage{tabuleiro}
+\usepackage[hidelinks]{hyperref}
+\input{graficos}
+
+\setlist{itemsep=2pt,topsep=4pt}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\fn}[1]{\textsc{#1}}            % nome de função da formalização
+\newcommand{\arq}[1]{\texttt{#1}}
+\newcommand{\captura}[2]{%
+  \IfFileExists{figs/#1.png}{\includegraphics[width=#2]{figs/#1.png}}{%
+    \fbox{\parbox[c][4cm][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\small Captura \arq{figs/#1.png} ausente.\\
+          Gere com \arq{make capturas} (roda \arq{python3 visualizador.py -{}-capturas figs}).}}}}
+
+\lstset{language=Python, basicstyle=\ttfamily\footnotesize, columns=fullflexible, keepspaces=true,
+  numbers=left, numberstyle=\tiny\color{black!50}, frame=lines, framerule=0.4pt,
+  keywordstyle=\color{corTab}\bfseries, commentstyle=\color{black!55}\itshape, stringstyle=\color{corV!70!black},
+  showstringspaces=false, literate={á}{{\'a}}1 {é}{{\'e}}1 {ê}{{\^e}}1 {ç}{{\c c}}1 {ã}{{\~a}}1 {ó}{{\'o}}1
+  {í}{{\'i}}1 {õ}{{\~o}}1 {ú}{{\'u}}1 {â}{{\^a}}1}
+
+\title{\textbf{TDE2 --- Busca Competitiva}\\[2pt]
+  \large Um agente alfa-beta para o Lig 4 e sua avaliação contra linhas de base}
+\author{Guilherme Arcanjo de Morais \and Lucas da Costa Paula \and Renan da Silva Andrade \and Renan Americo Herculano\\[6pt]
+  \small PUCPR · Escola Politécnica · Bacharelado em Ciência da Computação\\
+  \small Inteligência Artificial (PCO118A) · Prof. Carlos Costa Cedro · RA2}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Construímos um agente de busca alfa-beta com profundidade fixa para o Lig 4 (Connect Four, 6×7) e o
+comparamos com um agente aleatório e com o próprio agente em profundidades menores. A corretude do
+alfa-beta foi verificada pela igualdade de valor com o Minimax em profundidade completa. Em
+\dado{total-partidas} partidas, com custo medido em \emph{nós visitados}, o AlfaBeta-d8 venceu as
+\dado{ale-partidas} partidas contra o aleatório, fez \dado{d2-pontos} ponto por partida contra o d2 e
+\dado{d4-pontos} contra o d4, mas apenas \dado{d6-pontos} contra o d6, sem diferença significativa. O custo por lance
+tem cauda pesada: mediana de alguns milhares de nós e máximo de \dado{d2-max}. O agente não tem garantia de jogo
+ótimo nem limite de custo por lance, e o principal defeito medido é que a função de avaliação ignora a paridade
+das ameaças.
+\end{abstract}
+
+\tableofcontents
+
+% =====================================================================
+\section{O problema e por que ele é adequado ao método}
+
+\textbf{Lig 4.} Dois jogadores, X e O, alternam soltando uma peça em uma coluna não cheia de um tabuleiro
+vertical de 6 linhas × 7 colunas; a peça cai até a casa livre mais baixa. Vence quem alinhar 4 peças na
+horizontal, vertical ou diagonal. Tabuleiro cheio sem alinhamento é empate.
+
+\begin{table}[H]
+\centering\small
+\caption{As cinco verificações exigidas para o jogo.}
+\label{tab:cinco}
+\begin{tabularx}{\linewidth}{lcY}
+\toprule
+Propriedade & Sim? & Justificativa \\
+\midrule
+Dois jogadores & sim & X e O se alternam. \\
+Soma zero & sim & A vitória de um é a derrota do outro e o empate vale 0: $\fn{Utilidade}(s,O) = -\fn{Utilidade}(s,X)$. \\
+Informação perfeita & sim & O tabuleiro inteiro é visível para os dois jogadores. \\
+Determinístico & sim & $\fn{Resultado}(s,a)$ é único; não há sorteio. \\
+Finito & sim & Cada jogada ocupa uma das 42 casas, então toda partida acaba em no máximo 42 jogadas. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+O jogo é pequeno o bastante para implementar as regras em poucas linhas e grande demais para o Minimax
+puro (Seção~\ref{sec:bm}). Por isso a poda alfa-beta, o corte de profundidade e a função de avaliação são
+necessários. Para a verificação usamos instâncias menores do próprio Lig 4 (Seção~\ref{sec:verif}).
+
+% =====================================================================
+\section{Formalização (ID2.1)}
+\label{sec:formal}
+
+A implementação está em \arq{lig4.py}. A classe \texttt{Lig4(linhas, colunas, k)} é genérica: as instâncias
+pequenas usadas na verificação (4×4 e 3×4 com $K=3$) são o mesmo código com outros parâmetros.
+
+\paragraph{Estado e $s_0$.} $s = (x, o, \mathit{alturas}, \mathit{vez})$. Os campos $x$ e $o$ são
+\emph{bitboards}: a casa (coluna $c$, linha $r$, com $r=0$ embaixo) é o bit $c\cdot 7 + r$. Cada coluna ocupa
+7 bits, 6 casas mais um bit sentinela sempre zero no topo, num total de 49 bits. $\mathit{alturas}[c] \in \{0,\dots,6\}$ é o número de
+peças na coluna $c$, e $\mathit{vez} \in \{X, O\}$ diz quem joga. Assim $\fn{Jogador}(s) = s.\mathit{vez}$ é função
+do estado. $s_0$ é o tabuleiro vazio, com $\mathit{alturas} = (0,\dots,0)$ e $\mathit{vez} = X$: MAX começa.
+
+\paragraph{\fn{Ações} e \fn{Resultado}.} $\fn{Ações}(s) = \{c \in \{0..6\} : \mathit{alturas}[c] < 6\}$,
+ou $\emptyset$ se $s$ é terminal; logo $|\fn{Ações}(s)| \le 7$. $\fn{Resultado}(s, c)$ liga o bit
+$c\cdot 7 + \mathit{alturas}[c]$ no bitboard de quem joga, incrementa $\mathit{alturas}[c]$ e passa a vez.
+Jogar em coluna cheia é erro (exceção).
+
+\paragraph{\fn{Teste-Terminal}.} Verdadeiro se X ou O tem 4 em linha ou se as 42 casas estão ocupadas.
+O alinhamento é testado com deslocamentos: para cada direção $d \in \{1, 7, 6, 8\}$ (vertical, horizontal e
+as duas diagonais), há 4 em linha se $b \mathbin{\&} (b \gg d) \mathbin{\&} (b \gg 2d) \mathbin{\&} (b \gg 3d) \neq 0$.
+
+\paragraph{\fn{Utilidade}$(s, \text{MAX})$.} Um único número, do ponto de vista de MAX:
+\[
+  \fn{Utilidade}(s,\text{MAX}) =
+  \begin{cases}
+    +(1000 - n) & \text{se X venceu},\\
+    -(1000 - n) & \text{se O venceu},\\
+    0 & \text{empate},
+  \end{cases}
+\]
+onde $n \le 42$ é o número de peças no tabuleiro. O desconto por $n$ depende só do estado e faz a vitória mais
+rápida valer mais, o que impede o agente de adiar indefinidamente uma vitória que já viu. Toda vitória vale
+pelo menos $1000 - 42 = 958$ em módulo, e a avaliação heurística é limitada a $\pm 900$. Assim
+\[ |\fn{Aval}(s)| \le 900 < 958 \le |\fn{Utilidade}(s')| \quad\text{para todo corte } s \text{ e todo terminal com vencedor } s', \]
+e um valor vindo de um corte nunca se confunde com o de uma vitória ou derrota provada.
+
+\subsection{Fator de ramificação, profundidade e tamanho do espaço}
+\label{sec:bm}
+O fator de ramificação é 7 no início e cai quando colunas enchem. A média medida nos estados em que o agente
+jogou foi $b \approx \dado{b-medio}$. A partida tem no máximo 42 jogadas; a duração média medida foi
+$m \approx \dado{m-medio}$ (\dado{d6-durmedia} contra o d6). Daí
+\[
+  b^m \le 7^{42} \approx \dado{bm-max} \text{ folhas}, \qquad
+  \dado{b-medio}^{\,\dado{m-medio}} \approx \dado{bm-medido}.
+\]
+O número de posições legais distintas é cerca de $4{,}5 \times 10^{12}$ (contagem de Tromp). Mesmo a
+$10^6$ nós por segundo, percorrer $10^{20}$ folhas levaria mais de três milhões de anos, então o Minimax
+completo é inviável e usamos alfa-beta com corte de profundidade.
+
+\subsection{O que a representação torna impossível por construção}
+\begin{itemize}
+  \item \textbf{Peças flutuando.} Uma peça só entra na casa $(c, \mathit{alturas}[c])$, logo toda coluna é
+        preenchida de baixo para cima, sem buracos.
+  \item \textbf{Jogar em coluna cheia.} A coluna cheia não pertence a \fn{Ações}$(s)$ e \fn{Resultado} a rejeita.
+  \item \textbf{Jogar duas vezes seguidas} ou fora da vez. \fn{Resultado} sempre inverte $\mathit{vez}$, e a
+        peça vai para o bitboard de $\fn{Jogador}(s)$.
+  \item \textbf{Casa ocupada pelos dois.} $x$ e $o$ nunca têm o mesmo bit ligado, porque só a casa livre mais baixa recebe peça.
+  \item \textbf{Alinhamento ``dando a volta'' entre colunas.} O bit sentinela de cada coluna é sempre zero.
+        Por isso o deslocamento horizontal ou diagonal que sairia do topo de uma coluna para a base da seguinte
+        encontra um zero e o \texttt{\&} se anula.
+\end{itemize}
+A representação não impede o estado ``os dois venceram''. Ele é inalcançável, porque o jogo para no primeiro
+alinhamento, e \fn{Ações} devolve $\emptyset$ em qualquer estado com vencedor.
+
+% =====================================================================
+\section{Implementação (ID2.2)}
+\label{sec:impl}
+
+O código está em \arq{busca.py}. O alfa-beta segue o pseudocódigo da aula. A unidade de custo é contada na
+primeira linha: \emph{cada chamada da função recursiva é um nó visitado}, inclusive a raiz, as folhas
+cortadas por profundidade e os terminais.
+
+\lstinputlisting[firstline=93,lastline=117,firstnumber=93,caption={\arq{busca.py}: alfa-beta com contador de nós.}]{../busca.py}
+
+Na raiz, \texttt{decidir} examina todas as colunas. Cada filho é buscado com a janela que só aceita valores
+estritamente melhores que o melhor já encontrado. A jogada devolvida é a primeira de maior valor na ordem de
+exame, então o agente é determinístico.
+
+\paragraph{Ordenação de jogadas.} Centro primeiro, na ordem fixa 3, 2, 4, 1, 5, 0, 6, com custo zero. A coluna central
+participa de \dado{inclusoes-centro} das \dado{inclusoes} inclusões casa-janela e a de borda, de
+\dado{inclusoes-borda} (Figura~\ref{fig:janelas}). Por isso as jogadas centrais costumam ser as melhores e
+provocam podas cedo. O efeito medido está na Seção~\ref{sec:ordenacao}.
+
+\paragraph{Função de avaliação.} Uma \emph{janela} é um segmento de 4 casas em linha; o tabuleiro tem
+\dado{janelas}. Uma janela com peças dos dois jogadores vale 0, porque ninguém mais vence por ela. Para as demais:
+\begin{align*}
+  \fn{Aval}(s) = {}& \sum_{\text{janelas}} \big( 5\cdot[\text{3 de X + 1 vazia}] + 2\cdot[\text{2 de X + 2 vazias}] \big) \\
+                 & - \sum_{\text{janelas}} \big( 5\cdot[\text{3 de O + 1 vazia}] + 2\cdot[\text{2 de O + 2 vazias}] \big) \\
+                 & + 3\cdot(\text{peças de X} - \text{peças de O na coluna central}),
+\end{align*}
+limitada a $\pm 900$. Os pesos estão na Tabela~\ref{tab:pesos}. Eles foram escolhidos à mão, sem ajuste, e são
+os mesmos para todos os agentes de busca.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.36\linewidth}\centering
+  \mapaJanelas
+  \captionof{figure}{Janelas de 4 casas que passam por cada casa.}
+  \label{fig:janelas}
+\end{minipage}\hfill
+\begin{minipage}[c]{0.6\linewidth}\centering\small
+  \captionof{table}{Características e pesos da \fn{Aval}.}
+  \label{tab:pesos}
+  \begin{tabularx}{\linewidth}{lcY}
+  \toprule
+  Característica & Peso & Justificativa \\
+  \midrule
+  3 em linha + 1 vazia & 5 & ameaça direta, a uma jogada da vitória \\
+  2 em linha + 2 vazias & 2 & ameaça em construção, faltam duas jogadas \\
+  peça na coluna central & 3 & a casa central está em \dado{janelas-max-casa} janelas, um canto em \dado{janelas-canto}: controle posicional \\
+  \bottomrule
+  \end{tabularx}
+\end{minipage}
+\end{figure}
+
+\paragraph{Mecanismo de parada.} Profundidade fixa $d$, cortando também nos terminais: $d=8$ para o agente
+avaliado e $d \in \{2,4,6\}$ para os adversários. Preferimos profundidade fixa a aprofundamento iterativo com
+relógio porque o custo é medido em nós. Com relógio, o número de nós e as próprias jogadas dependeriam da
+máquina, e o experimento deixaria de ser reprodutível. Não há busca de quiescência (Seção~\ref{sec:garantias}).
+
+% =====================================================================
+\section{Verificação de corretude}
+\label{sec:verif}
+
+Pelo Teorema~1 da Aula~7, aplicado à mesma árvore, o alfa-beta devolve na raiz exatamente o valor do
+Minimax. A igualdade de valor em profundidade completa é, portanto, a evidência de corretude que se pode
+exigir. Ela distingue um alfa-beta correto de um que poda demais. O script \arq{verificacao.py} compara os dois
+nos casos da Tabela~\ref{tab:verif} e terminou com \textbf{\dado{verificacao-status}}.
+
+\begin{table}[H]
+\centering\small
+\caption{Minimax $\times$ alfa-beta. Nós visitados somados sobre todas as posições de cada caso.}
+\label{tab:verif}
+\begin{tabularx}{\linewidth}{Yrrr}
+\toprule
+Caso & Minimax & Alfa-beta & Divergências \\
+\midrule
+4×4, $K=3$, profundidade completa a partir de $s_0$, sem ordenação
+  & valor \dado{t1-mm-valor}, \dado{t1-mm-nos} & valor \dado{t1-ab-sem-valor}, \dado{t1-ab-sem-nos} & 0 \\
+4×4, $K=3$, profundidade completa a partir de $s_0$, centro primeiro
+  & valor \dado{t1-mm-valor}, \dado{t1-mm-nos} & valor \dado{t1-ab-valor}, \dado{t1-ab-nos} & 0 \\
+200 posições aleatórias do 3×4, $K=3$, profundidade completa & \dado{t2-mm} & \dado{t2-ab} (\dado{t2-pct}) & 0 \\
+100 finais aleatórios do 6×7 com 8 casas vazias, profundidade completa & \dado{t3-mm} & \dado{t3-ab} (\dado{t3-pct}) & 0 \\
+100 posições do 6×7 com corte em $d=4$ e a mesma \fn{Aval} (valor \emph{e} jogada) & \dado{t4-mm} & \dado{t4-ab} (\dado{t4-pct}) & 0 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+O valor $991 = 1000 - 9$ significa que, no 4×4 com $K=3$, X vence com jogo perfeito e a vitória sai na 9.ª peça.
+O mesmo valor é obtido com e sem ordenação, enquanto o número de nós cai de \dado{t1-mm-nos} para
+\dado{t1-ab-nos}.
+\ifnum\dado{teste5}=1
+O Teste~5 cobre o visualizador (Seção~\ref{sec:viz}). As versões instrumentadas da busca (\arq{rastreio.py}),
+que registram a árvore para a animação, foram comparadas com as de \arq{busca.py} em \dado{t5-comparacoes} casos:
+mesmo valor, mesma jogada e o mesmo número de nós, sem divergência.
+\fi
+
+% =====================================================================
+\section{Protocolo experimental (ID2.3)}
+\label{sec:protocolo}
+
+\paragraph{Agentes.} O agente avaliado é o \textbf{AlfaBeta-d8}: alfa-beta, profundidade 8, \fn{Aval} de janelas e
+centro primeiro. Os adversários são:
+\begin{enumerate}
+  \item \textbf{Aleatório}: escolha uniforme em \fn{Ações}$(s)$ com semente fixa. É a linha de base trivial.
+  \item \textbf{AlfaBeta-d2, d4 e d6}: o próprio agente com profundidade menor, com o mesmo código, a mesma
+        \fn{Aval}, os mesmos pesos e a mesma ordenação.
+\end{enumerate}
+
+\paragraph{Unidade de custo.} Nós visitados, definidos na Seção~\ref{sec:impl}. Para cada lance do agente
+avaliado registramos o número de nós e reportamos média, desvio, mínimo, quartis, mediana, p95 e máximo. O tempo
+de parede é gravado só como informação e não entra em nenhuma comparação.
+
+\paragraph{Partidas e sementes.} Dois agentes determinísticos jogariam sempre a mesma partida. Por isso:
+\begin{itemize}
+  \item contra AlfaBeta-d$k$, as 2 primeiras jogadas são forçadas e percorrem as $7 \times 7 = 49$ aberturas. Cada
+        abertura é jogada 2 vezes, trocando quem começa, num total de 98 partidas por confronto. Não há sorteio. Empates entre
+        jogadas são desfeitos pela ordem de exame, e as jogadas forçadas não contam custo;
+  \item contra o Aleatório, 100 partidas, com a semente do adversário igual ao número da partida (0 a 99). O
+        agente avaliado começa nas partidas pares.
+\end{itemize}
+São \dado{total-partidas} partidas no total. O teste de ordenação sorteia, com semente 42, \dado{ord-posicoes}
+posições em que o agente avaliado jogou e as busca com d8 com e sem ordenação.
+
+\paragraph{Calibração simétrica.} Os quatro agentes de busca usam o mesmo código, a mesma \fn{Aval} e a mesma
+ordenação; só a profundidade muda. Nenhum dos lados foi ajustado: os pesos (5, 2, 3) foram fixados antes do
+experimento e não foram varridos.
+
+\paragraph{Reprodução.} Todo o experimento é determinístico:
+\begin{center}\small
+\texttt{python3 verificacao.py} \quad·\quad \texttt{python3 experimento.py} \quad·\quad \texttt{python3 exportar\_dados.py}
+\end{center}
+O \arq{experimento.py} grava em \arq{resultados.json}, para cada partida, a sequência de colunas, o resultado e os nós
+de cada lance. Rodar de novo produz os mesmos números (só o tempo de parede muda), e o visualizador
+reproduz qualquer partida e confere os dados lance a lance (Seção~\ref{sec:viz}).
+
+% =====================================================================
+\section{Resultados}
+\label{sec:resultados}
+
+\subsection{Resultado das partidas}
+
+\begin{table}[H]
+\centering\small
+\caption{Resultados do AlfaBeta-d8. IC 95\,\% de Wilson para a taxa de vitória; pontos: vitória = 1, empate = ½.}
+\label{tab:res}
+\begin{tabular}{lrrrrcr}
+\toprule
+Adversário & Partidas & V & E & D & Taxa de vitória (IC 95\,\%) & Pontos \\
+\midrule
+Aleatório   & \dado{ale-partidas} & \dado{ale-V} & \dado{ale-E} & \dado{ale-D} & \dado{ale-taxa} (\dado{ale-lo} a \dado{ale-hi}) & \dado{ale-pontos} \\
+AlfaBeta-d2 & \dado{d2-partidas} & \dado{d2-V} & \dado{d2-E} & \dado{d2-D} & \dado{d2-taxa} (\dado{d2-lo} a \dado{d2-hi}) & \dado{d2-pontos} \\
+AlfaBeta-d4 & \dado{d4-partidas} & \dado{d4-V} & \dado{d4-E} & \dado{d4-D} & \dado{d4-taxa} (\dado{d4-lo} a \dado{d4-hi}) & \dado{d4-pontos} \\
+AlfaBeta-d6 & \dado{d6-partidas} & \dado{d6-V} & \dado{d6-E} & \dado{d6-D} & \dado{d6-taxa} (\dado{d6-lo} a \dado{d6-hi}) & \dado{d6-pontos} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\graficoResultados
+\caption{Vitórias, empates e derrotas do AlfaBeta-d8 por adversário, com o IC 95\,\% da taxa de vitória.}
+\label{fig:res}
+\end{figure}
+
+\begin{table}[H]
+\centering\small
+\caption{Resultado por lado (V/E/D do AlfaBeta-d8).}
+\label{tab:lado}
+\begin{tabular}{lcc}
+\toprule
+Adversário & d8 começando (X) & d8 em segundo (O) \\
+\midrule
+Aleatório   & \dado{ale-XV}/\dado{ale-XE}/\dado{ale-XD} & \dado{ale-OV}/\dado{ale-OE}/\dado{ale-OD} \\
+AlfaBeta-d2 & \dado{d2-XV}/\dado{d2-XE}/\dado{d2-XD} & \dado{d2-OV}/\dado{d2-OE}/\dado{d2-OD} \\
+AlfaBeta-d4 & \dado{d4-XV}/\dado{d4-XE}/\dado{d4-XD} & \dado{d4-OV}/\dado{d4-OE}/\dado{d4-OD} \\
+AlfaBeta-d6 & \dado{d6-XV}/\dado{d6-XE}/\dado{d6-XD} & \dado{d6-OV}/\dado{d6-OE}/\dado{d6-OD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Custo: nós visitados por lance}
+
+\begin{table}[H]
+\centering\small
+\caption{Nós visitados por lance do AlfaBeta-d8. A última coluna é a média do adversário, na mesma unidade.}
+\label{tab:custo}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+Adversário & Lances & Média & Desvio & $Q_1$ & Mediana & $Q_3$ & p95 & Máx. & Adv. (média) \\
+\midrule
+Aleatório   & \dado{ale-lances} & \dado{ale-media} & \dado{ale-desvio} & \dado{ale-q1} & \dado{ale-mediana} & \dado{ale-q3} & \dado{ale-p95} & \dado{ale-max} & \dado{ale-advmedia} \\
+AlfaBeta-d2 & \dado{d2-lances} & \dado{d2-media} & \dado{d2-desvio} & \dado{d2-q1} & \dado{d2-mediana} & \dado{d2-q3} & \dado{d2-p95} & \dado{d2-max} & \dado{d2-advmedia} \\
+AlfaBeta-d4 & \dado{d4-lances} & \dado{d4-media} & \dado{d4-desvio} & \dado{d4-q1} & \dado{d4-mediana} & \dado{d4-q3} & \dado{d4-p95} & \dado{d4-max} & \dado{d4-advmedia} \\
+AlfaBeta-d6 & \dado{d6-lances} & \dado{d6-media} & \dado{d6-desvio} & \dado{d6-q1} & \dado{d6-mediana} & \dado{d6-q3} & \dado{d6-p95} & \dado{d6-max} & \dado{d6-advmedia} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.49\linewidth}\centering
+  \graficoCaixas[width=0.95\linewidth, height=6.2cm, xticklabels={Aleat.,d2,d4,d6}]
+  \caption{Caixa: quartis; bigodes: mínimo e p95; $\times$: máximo; $\blacklozenge$: média.}
+\end{subfigure}\hfill
+\begin{subfigure}{0.49\linewidth}\centering
+  \graficoHistNos[width=0.88\linewidth, height=6.2cm]
+  \caption{Distribuição completa, com 4 faixas por década.}
+\end{subfigure}
+\caption{Distribuição dos nós visitados por lance do AlfaBeta-d8 (escala logarítmica).}
+\label{fig:custo}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\graficoDuracao
+\caption{Duração das partidas (peças no fim). Média: \dado{ale-durmedia} contra o aleatório, \dado{d2-durmedia}
+contra o d2, \dado{d4-durmedia} contra o d4 e \dado{d6-durmedia} contra o d6.}
+\label{fig:duracao}
+\end{figure}
+
+\subsection{Ordenação de jogadas}
+\label{sec:ordenacao}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[c]{0.48\linewidth}\centering
+  \graficoOrdenacao[width=0.95\linewidth, height=0.95\linewidth]
+\end{minipage}\hfill
+\begin{minipage}[c]{0.48\linewidth}\small
+  \begin{tabular}{lrr}
+  \toprule
+  Nós (d8) & com & sem \\
+  \midrule
+  Média   & \dado{ord-com-media} & \dado{ord-sem-media} \\
+  Mediana & \dado{ord-com-mediana} & \dado{ord-sem-mediana} \\
+  p95     & \dado{ord-com-p95} & \dado{ord-sem-p95} \\
+  Máximo  & \dado{ord-com-max} & \dado{ord-sem-max} \\
+  \bottomrule
+  \end{tabular}
+
+  \medskip
+  Razão com/sem: média \dado{ord-razao-media}, mediana \dado{ord-razao-mediana}, máxima \dado{ord-razao-max}.
+  Valor da raiz idêntico nas duas variantes: \dado{ord-mesmos}. Em \dado{ord-pior} das \dado{ord-posicoes}
+  posições (pontos vermelhos, acima da diagonal) a ordenação custou \emph{mais} nós.
+\end{minipage}
+\caption{Centro primeiro × ordem natural nas mesmas \dado{ord-posicoes} posições, buscadas com d8.}
+\label{fig:ordenacao}
+\end{figure}
+
+% =====================================================================
+\section{Análise}
+\label{sec:analise}
+
+\paragraph{A linha de base é vencida sem exceção.} Foram \dado{ale-V} vitórias em \dado{ale-partidas} contra o
+aleatório (IC 95\,\% \dado{ale-lo} a \dado{ale-hi}), com partidas curtas (mediana de \dado{ale-durmediana} peças).
+Esse resultado só mostra que o agente não é trivial.
+
+\paragraph{Os retornos da profundidade caem rápido.} Os pontos por partida caem de \dado{d2-pontos} (contra o d2)
+para \dado{d4-pontos} (d4) e \dado{d6-pontos} (d6). Contra o d6, o IC 95\,\% da taxa de vitória
+(\dado{d6-lo} a \dado{d6-hi}) fica inteiro abaixo de 50\,\%, e a pontuação está perto de ½ por causa dos
+\dado{d6-E} empates. Com 98 partidas não é possível afirmar que d8 > d6. Nossa hipótese é que, a partir daí,
+a \fn{Aval} limita mais que a profundidade; o caso de zugzwang abaixo é um exemplo.
+
+\paragraph{O custo por lance tem cauda pesada.} A mediana fica entre \dado{d6-mediana} e \dado{ale-mediana} nós,
+mas o máximo chega a \dado{d2-max} (Figura~\ref{fig:custo}). A profundidade fixa não limita o pior caso, por isso
+reportamos também p95 e máximo. O custo mediano cai contra adversários mais fortes, provavelmente porque as partidas
+ficam mais longas (Figura~\ref{fig:duracao}), e nas posições com colunas cheias há menos jogadas legais. O
+adversário gasta uma fração disso: em média \dado{d2-advmedia}, \dado{d4-advmedia} e \dado{d6-advmedia} nós por
+lance para d2, d4 e d6.
+
+\paragraph{A \fn{Aval} ignora a paridade das ameaças (zugzwang).} O d8 perdeu \dado{d2-D} partidas até para o d2,
+\dado{d2-perdidas-O} delas jogando em segundo, todas terminadas com \dado{d2-perdidas-O-min} a
+\dado{d2-perdidas-O-max} peças. A Figura~\ref{fig:zugzwang} acompanha a partida nº \dado{zz-id} (abertura
+\dado{zz-abertura}). Com \dado{zz-antes-pecas} peças no tabuleiro, a busca d8 ainda dava \dado{zz-antes-valor},
+ou seja, uma posição levemente favorável a O. Duas jogadas depois, com \dado{zz-perdido-pecas} peças, já via a
+vitória forçada de X (\dado{zz-perdido-valor}, isto é, X alinha com a \dado{zz-perdido-final}.ª peça), tarde
+demais. No fim do Lig 4, quem é obrigado a jogar embaixo da ameaça do outro perde. Ameaças em linha ímpar ou par
+decidem esses finais, e a \fn{Aval} conta as duas da mesma forma.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[b]{0.3\linewidth}\centering
+  \tabuleiro{\tabZzAntes}[][\colZzAntes]\\[2pt]
+  {\footnotesize (a) \dado{zz-antes-pecas} peças, valor \dado{zz-antes-valor}; O joga na coluna \colZzAntes}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.3\linewidth}\centering
+  \tabuleiro{\tabZzPerdido}[][\colZzPerdido]\\[2pt]
+  {\footnotesize (b) \dado{zz-perdido-pecas} peças, valor \dado{zz-perdido-valor}: derrota já forçada}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.3\linewidth}\centering
+  \tabuleiro{\tabZzFinal}[\tabZzFinalVence]\\[2pt]
+  {\footnotesize (c) final: X alinha na diagonal com a \dado{zz-jogadas}.ª peça}
+\end{minipage}
+
+\medskip
+\graficoZugzwang[height=4.6cm]
+\caption{Partida nº \dado{zz-id} contra o AlfaBeta-d2, d8 jogando com O (amarelo). Em cima, posições em
+que o d8 decide (a seta marca a coluna escolhida). Embaixo, a \fn{Aval} e o valor da busca d8 a cada decisão,
+do ponto de vista de X. O valor $+965$ é a vitória forçada de X.}
+\label{fig:zugzwang}
+\end{figure}
+
+\paragraph{A ordenação ajuda na média, mas nem sempre.} Centro primeiro reduz a média de nós em
+\dado{ord-reducao-media} e devolve o mesmo valor. Ainda assim, em \dado{ord-pior} das \dado{ord-posicoes}
+posições custou mais, até \dado{ord-razao-max} vezes (Figura~\ref{fig:ordenacao}). Uma ordem fixa não sabe qual
+coluna é boa naquela posição.
+
+% =====================================================================
+\section{O que não funcionou e garantias ausentes}
+\label{sec:garantias}
+
+\begin{itemize}
+  \item \textbf{O agente não é ótimo.} No 6×7 a busca não chega aos terminais, e o valor de um corte é uma
+        estimativa. Só os valores $|v| \ge 958$ são vitórias provadas.
+  \item \textbf{Efeito horizonte.} Não há busca de quiescência, então uma ameaça logo depois da profundidade 8
+        passa despercebida. A partida da Figura~\ref{fig:zugzwang} é um caso medido.
+  \item \textbf{Paridade das ameaças ignorada.} É o defeito da \fn{Aval} que levou à derrota da
+        Figura~\ref{fig:zugzwang}. Achamos que ele explica boa parte das derrotas para o d2 jogando em segundo,
+        mas só essa partida foi analisada em detalhe.
+  \item \textbf{Pesos não ajustados.} Os valores (5, 2, 3) foram escolhidos à mão. Não sabemos se outros pesos seriam melhores.
+  \item \textbf{Sem limite de custo por lance.} Com profundidade fixa, o pior caso medido foi \dado{d2-max} nós;
+        nada impede um lance mais caro em outra posição.
+  \item \textbf{Validade restrita às aberturas testadas.} Contra os adversários alfa-beta, os resultados valem
+        para as 49 aberturas de 2 jogadas, não para qualquer partida. Como os dois lados são determinísticos, cada
+        abertura gera uma única partida.
+  \item \textbf{Determinismo explorável.} O mesmo estado sempre produz a mesma jogada, e um adversário que
+        conheça o agente pode repetir uma linha vencedora.
+  \item \textbf{Sem significância contra o d6.} A diferença d8 × d6 não é distinguível com 98 partidas.
+\end{itemize}
+
+% =====================================================================
+\section{Ferramenta de visualização}
+\label{sec:viz}
+
+O \arq{visualizador.py} é uma aplicação Tkinter, só com a biblioteca padrão, que roda o mesmo código de
+\arq{lig4.py} e \arq{busca.py}. As versões instrumentadas de \arq{rastreio.py} só registram o que a busca faz; o
+Teste~5 de \arq{verificacao.py} confere que elas dão o mesmo valor, a mesma jogada e o mesmo número de nós. A
+busca roda numa thread separada, então o contador de nós sobe na tela enquanto o agente pensa.
+
+\begin{description}[style=nextline]
+  \item[Jogar] Tabuleiro com queda animada das peças e qualquer combinação de humano, aleatório ou AlfaBeta-d2 a
+        d8 nos dois lados, com abertura forçada opcional. O painel mostra \emph{nós visitados neste lance} ao vivo,
+        totais por jogador e um gráfico de nós por lance em escala log. Acima de cada coluna aparece o valor que
+        a busca atribuiu àquela jogada: exato, ou limite $\le$/$\ge$ quando a janela da raiz cortou, e ``vence
+        em $k$'' para vitórias forçadas. Há ainda a decomposição da \fn{Aval} da posição atual e o mapa de janelas por casa da
+        Figura~\ref{fig:janelas}. A opção \emph{Reproduzir partida do experimento} refaz qualquer das
+        \dado{total-partidas} partidas e confere resultado, peças, sequência de colunas e nós de cada lance
+        contra o \arq{resultados.json}.
+  \item[Árvore alfa-beta] Desenha a árvore completa do Minimax para uma posição pequena (finais em
+        profundidade completa ou meio-jogo com $d \le 3$) e anima o alfa-beta passo a passo, com $\alpha$ e $\beta$ em cada
+        nó do caminho, valores subindo e subárvores podadas em cinza. Os contadores comparam os nós do
+        alfa-beta com os do Minimax, e o valor das duas buscas aparece lado a lado.
+  \item[Resultados] Os gráficos da Seção~\ref{sec:resultados} lidos do \arq{resultados.json}.
+\end{description}
+
+\begin{figure}[H]
+\centering
+\captura{jogar}{0.92\linewidth}
+\caption{Aba \emph{Jogar}: contador de nós ao vivo, valor de cada coluna na raiz e decomposição da \fn{Aval}.}
+\label{fig:viz-jogar}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.49\linewidth}\centering\captura{arvore}{\linewidth}\caption{Árvore alfa-beta.}\end{subfigure}\hfill
+\begin{subfigure}{0.49\linewidth}\centering\captura{resultados}{\linewidth}\caption{Resultados.}\end{subfigure}
+\caption{Demais abas do visualizador.}
+\label{fig:viz-outras}
+\end{figure}
+
+% =====================================================================
+\section{Arquivos e reprodução}
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{lY}
+\toprule
+Arquivo & Conteúdo \\
+\midrule
+\arq{lig4.py} & formalização: $s_0$, \fn{Jogador}, \fn{Ações}, \fn{Resultado}, \fn{Teste-Terminal}, \fn{Utilidade} \\
+\arq{busca.py} & Minimax, alfa-beta, \fn{Aval}, ordenação, contador de nós, agentes \\
+\arq{verificacao.py} & igualdade Minimax = alfa-beta (saída em \arq{verificacao\_saida.txt}) \\
+\arq{experimento.py} & protocolo completo; gera \arq{resultados.json} e \arq{resultados.md} \\
+\arq{exportar\_dados.py} & tabelas, números e tabuleiros deste relatório (\arq{relatorio/dados/}) \\
+\arq{visualizador.py}, \arq{viz/}, \arq{rastreio.py} & ferramenta de visualização \\
+\arq{relatorio/} & este relatório, os slides e a ficha (\arq{make} gera os três PDFs) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\end{document}
